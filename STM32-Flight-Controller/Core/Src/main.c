@@ -48,11 +48,13 @@ TIM_HandleTypeDef htim2;
 UART_HandleTypeDef huart2;
 
 /* USER CODE BEGIN PV */
+
 uint32_t lastButtonPress = 0;
 uint32_t duty = 0;
 int32_t direction = 10;
 uint32_t adcValue = 0;
 char uartBuffer[64];
+float voltage = 0.0f;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -120,6 +122,7 @@ int main(void)
 
     /* USER CODE END WHILE */
 		  HAL_ADC_Start(&hadc1);
+		  voltage = (adcValue * 3.3f) / 4095.0f;
 
 		  if (HAL_ADC_PollForConversion(&hadc1, 100) == HAL_OK)
 		  {
@@ -128,8 +131,9 @@ int main(void)
 		      int length = snprintf(
 		          uartBuffer,
 		          sizeof(uartBuffer),
-		          "ADC: %lu\r\n",
-		          adcValue
+				  "ADC: %lu   Voltage: %.2f V\r\n",
+		          adcValue,
+				  voltage
 		      );
 
 		      HAL_UART_Transmit(
