@@ -23,6 +23,7 @@
 /* USER CODE BEGIN Includes */
 #include <string.h>
 #include <stdio.h>
+#define MPU6050_ADDR (0x68 << 1)
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -42,6 +43,8 @@
 
 /* Private variables ---------------------------------------------------------*/
 ADC_HandleTypeDef hadc1;
+
+I2C_HandleTypeDef hi2c1;
 
 TIM_HandleTypeDef htim2;
 
@@ -63,6 +66,7 @@ static void MX_GPIO_Init(void);
 static void MX_USART2_UART_Init(void);
 static void MX_TIM2_Init(void);
 static void MX_ADC1_Init(void);
+static void MX_I2C1_Init(void);
 /* USER CODE BEGIN PFP */
 
 /* USER CODE END PFP */
@@ -104,6 +108,7 @@ int main(void)
   MX_USART2_UART_Init();
   MX_TIM2_Init();
   MX_ADC1_Init();
+  MX_I2C1_Init();
   /* USER CODE BEGIN 2 */
   //HAL_TIM_Base_Start_IT(&htim2);
   const char message[] = "STM32 gestartet!\r\n";
@@ -112,42 +117,116 @@ int main(void)
                     strlen(message),
                     HAL_MAX_DELAY);
   HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_1);
+
+
+  // PWM starten
+  HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_1);
+
+  // WHO_AM_I lesen
+  uint8_t who_am_i = 0;
+
+  HAL_I2C_Mem_Read(
+      &hi2c1,
+      0x68 << 1,
+      0x75,
+      I2C_MEMADD_SIZE_8BIT,
+      &who_am_i,
+      1,
+      HAL_MAX_DELAY
+  );
+
+  char buffer[100];
+
+  snprintf(buffer,
+           sizeof(buffer),
+           "WHO_AM_I: 0x%02X\r\n",
+           who_am_i);
+
+  HAL_UART_Transmit(
+      &huart2,
+      (uint8_t*)buffer,
+      strlen(buffer),
+      HAL_MAX_DELAY
+  );
+
+  // Sensor aufwecken
+  uint8_t wake = 0x00;
+
+  HAL_I2C_Mem_Write(
+      &hi2c1,
+      0x68 << 1,
+      0x6B,
+      I2C_MEMADD_SIZE_8BIT,
+      &wake,
+      1,
+      HAL_MAX_DELAY
+  );
+
+
+
+  // HIER EINFÜGEN
+
+
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
+  while (1)
+  {
+      uint8_t accel_data[6];
 
-	  while (1)
-	  {
+      HAL_StatusTypeDef status = HAL_I2C_Mem_Read(
+          &hi2c1,
+          0x68 << 1,
+          0x3B,
+          I2C_MEMADD_SIZE_8BIT,
+          accel_data,
+          6,
+          100
+      );
 
-    /* USER CODE END WHILE */
-		  HAL_ADC_Start(&hadc1);
-		  voltage = (adcValue * 3.3f) / 4095.0f;
+      if (status == HAL_OK)
+      {
+          int16_t accel_x_raw =
+              (int16_t)((accel_data[0] << 8) | accel_data[1]);
 
-		  if (HAL_ADC_PollForConversion(&hadc1, 100) == HAL_OK)
-		  {
-		      adcValue = HAL_ADC_GetValue(&hadc1);
+          int16_t accel_y_raw =
+              (int16_t)((accel_data[2] << 8) | accel_data[3]);
 
-		      int length = snprintf(
-		          uartBuffer,
-		          sizeof(uartBuffer),
-				  "ADC: %lu   Voltage: %.2f V\r\n",
-		          adcValue,
-				  voltage
-		      );
+          int16_t accel_z_raw =
+              (int16_t)((accel_data[4] << 8) | accel_data[5]);
 
-		      HAL_UART_Transmit(
-		          &huart2,
-		          (uint8_t *)uartBuffer,
-		          length,
-		          100
-		      );
-		  }
+          float accel_x = accel_x_raw / 16384.0f;
+          float accel_y = accel_y_raw / 16384.0f;
+          float accel_z = accel_z_raw / 16384.0f;
 
-		  HAL_ADC_Stop(&hadc1);
-		  HAL_Delay(200);
-    /* USER CODE BEGIN 3 */
+          char accel_buffer[100];
+
+          int accel_length = snprintf(
+              accel_buffer,
+              sizeof(accel_buffer),
+              "AX: %.2f g | AY: %.2f g | AZ: %.2f g\r\n",
+              accel_x,
+              accel_y,
+              accel_z
+          );
+
+          HAL_UART_Transmit(
+              &huart2,
+              (uint8_t *)accel_buffer,
+              accel_length,
+              100
+          );
+      }
+
+      HAL_Delay(200);
+
+      /* USER CODE END WHILE */
+
+      /* USER CODE BEGIN 3 */
   }
+  /* USER CODE END 3 */
+
   /* USER CODE END 3 */
 }
 
@@ -188,8 +267,9 @@ void SystemClock_Config(void)
   {
     Error_Handler();
   }
-  PeriphClkInit.PeriphClockSelection = RCC_PERIPHCLK_ADC12;
+  PeriphClkInit.PeriphClockSelection = RCC_PERIPHCLK_I2C1|RCC_PERIPHCLK_ADC12;
   PeriphClkInit.Adc12ClockSelection = RCC_ADC12PLLCLK_DIV1;
+  PeriphClkInit.I2c1ClockSelection = RCC_I2C1CLKSOURCE_HSI;
   if (HAL_RCCEx_PeriphCLKConfig(&PeriphClkInit) != HAL_OK)
   {
     Error_Handler();
@@ -259,6 +339,54 @@ static void MX_ADC1_Init(void)
   /* USER CODE BEGIN ADC1_Init 2 */
 
   /* USER CODE END ADC1_Init 2 */
+
+}
+
+/**
+  * @brief I2C1 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_I2C1_Init(void)
+{
+
+  /* USER CODE BEGIN I2C1_Init 0 */
+
+  /* USER CODE END I2C1_Init 0 */
+
+  /* USER CODE BEGIN I2C1_Init 1 */
+
+  /* USER CODE END I2C1_Init 1 */
+  hi2c1.Instance = I2C1;
+  hi2c1.Init.Timing = 0x00201D2B;
+  hi2c1.Init.OwnAddress1 = 0;
+  hi2c1.Init.AddressingMode = I2C_ADDRESSINGMODE_7BIT;
+  hi2c1.Init.DualAddressMode = I2C_DUALADDRESS_DISABLE;
+  hi2c1.Init.OwnAddress2 = 0;
+  hi2c1.Init.OwnAddress2Masks = I2C_OA2_NOMASK;
+  hi2c1.Init.GeneralCallMode = I2C_GENERALCALL_DISABLE;
+  hi2c1.Init.NoStretchMode = I2C_NOSTRETCH_DISABLE;
+  if (HAL_I2C_Init(&hi2c1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+
+  /** Configure Analogue filter
+  */
+  if (HAL_I2CEx_ConfigAnalogFilter(&hi2c1, I2C_ANALOGFILTER_ENABLE) != HAL_OK)
+  {
+    Error_Handler();
+  }
+
+  /** Configure Digital filter
+  */
+  if (HAL_I2CEx_ConfigDigitalFilter(&hi2c1, 0) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN I2C1_Init 2 */
+
+  /* USER CODE END I2C1_Init 2 */
 
 }
 
