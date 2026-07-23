@@ -21,6 +21,7 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#include <math.h>
 #include <string.h>
 #include <stdio.h>
 #define MPU6050_ADDR (0x68 << 1)
@@ -61,6 +62,8 @@ float voltage = 0.0f;
 float gyro_x_offset = 0.0f;
 float gyro_y_offset = 0.0f;
 float gyro_z_offset = 0.0f;
+float roll_gyro = 0.0f;
+float pitch_gyro = 0.0f;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -283,18 +286,30 @@ int main(void)
 	      float gyro_y = (gyro_y_raw - gyro_y_offset) / 131.0f;
 	      float gyro_z = (gyro_z_raw - gyro_z_offset) / 131.0f;
 
+	      float dt = 0.01f;
+
+	      roll_gyro += gyro_x * dt;
+	      pitch_gyro += gyro_y * dt;
+
+	      float roll =
+	          atan2f(accel_y, accel_z) * 180.0f / 3.14159265f;
+
+	      float pitch =
+	          atan2f(
+	              -accel_x,
+	              sqrtf(accel_y * accel_y + accel_z * accel_z)
+	          ) * 180.0f / 3.14159265f;
+
 	      char imu_buffer[160];
 
 	      int imu_length = snprintf(
 	          imu_buffer,
 	          sizeof(imu_buffer),
-	          "A: %.2f %.2f %.2f g | G: %.2f %.2f %.2f deg/s\r\n",
-	          accel_x,
-	          accel_y,
-	          accel_z,
-	          gyro_x,
-	          gyro_y,
-	          gyro_z
+	          "ACC Roll: %.2f | ACC Pitch: %.2f | GYRO Roll: %.2f | GYRO Pitch: %.2f\r\n",
+	          roll,
+	          pitch,
+	          roll_gyro,
+	          pitch_gyro
 	      );
 
 	      HAL_UART_Transmit(
@@ -316,7 +331,7 @@ int main(void)
 	      );
 	  }
 
-	  HAL_Delay(200);
+	  HAL_Delay(10);
 
       /* USER CODE END WHILE */
 
