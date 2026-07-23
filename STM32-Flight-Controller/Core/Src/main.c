@@ -58,12 +58,23 @@ uint32_t duty = 0;
 int32_t direction = 10;
 uint32_t adcValue = 0;
 char uartBuffer[64];
-float voltage = 0.0f;
+
 float gyro_x_offset = 0.0f;
 float gyro_y_offset = 0.0f;
 float gyro_z_offset = 0.0f;
 float roll_gyro = 0.0f;
 float pitch_gyro = 0.0f;
+float roll_filter = 0.0f;
+float pitch_filter = 0.0f;
+
+float roll_setpoint = 0.0f;
+float pitch_setpoint = 0.0f;
+
+float kp_roll = 1.0f;
+float kp_pitch = 1.0f;
+
+float roll_pid_output = 0.0f;
+float pitch_pid_output = 0.0f;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -244,94 +255,113 @@ int main(void)
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
+  uint32_t previous_time = HAL_GetTick();
   while (1)
   {
-	  uint8_t imu_data[14];
+      uint8_t imu_data[14];
 
-	  HAL_StatusTypeDef status = HAL_I2C_Mem_Read(
-	      &hi2c1,
-	      0x68 << 1,
-	      0x3B,
-	      I2C_MEMADD_SIZE_8BIT,
-	      imu_data,
-	      14,
-	      100
-	  );
+      HAL_StatusTypeDef status = HAL_I2C_Mem_Read(
+          &hi2c1,
+          0x68 << 1,
+          0x3B,
+          I2C_MEMADD_SIZE_8BIT,
+          imu_data,
+          14,
+          100
+      );
 
-	  if (status == HAL_OK)
-	  {
-	      int16_t accel_x_raw =
-	          (int16_t)((imu_data[0] << 8) | imu_data[1]);
+      if (status == HAL_OK)
+      {
+          int16_t accel_x_raw =
+              (int16_t)((imu_data[0] << 8) | imu_data[1]);
 
-	      int16_t accel_y_raw =
-	          (int16_t)((imu_data[2] << 8) | imu_data[3]);
+          int16_t accel_y_raw =
+              (int16_t)((imu_data[2] << 8) | imu_data[3]);
 
-	      int16_t accel_z_raw =
-	          (int16_t)((imu_data[4] << 8) | imu_data[5]);
+          int16_t accel_z_raw =
+              (int16_t)((imu_data[4] << 8) | imu_data[5]);
 
-	      int16_t gyro_x_raw =
-	          (int16_t)((imu_data[8] << 8) | imu_data[9]);
+          int16_t gyro_x_raw =
+              (int16_t)((imu_data[8] << 8) | imu_data[9]);
 
-	      int16_t gyro_y_raw =
-	          (int16_t)((imu_data[10] << 8) | imu_data[11]);
+          int16_t gyro_y_raw =
+              (int16_t)((imu_data[10] << 8) | imu_data[11]);
 
-	      int16_t gyro_z_raw =
-	          (int16_t)((imu_data[12] << 8) | imu_data[13]);
+          int16_t gyro_z_raw =
+              (int16_t)((imu_data[12] << 8) | imu_data[13]);
 
-	      float accel_x = accel_x_raw / 16384.0f;
-	      float accel_y = accel_y_raw / 16384.0f;
-	      float accel_z = accel_z_raw / 16384.0f;
+          float accel_x = accel_x_raw / 16384.0f;
+          float accel_y = accel_y_raw / 16384.0f;
+          float accel_z = accel_z_raw / 16384.0f;
 
-	      float gyro_x = (gyro_x_raw - gyro_x_offset) / 131.0f;
-	      float gyro_y = (gyro_y_raw - gyro_y_offset) / 131.0f;
-	      float gyro_z = (gyro_z_raw - gyro_z_offset) / 131.0f;
+          float gyro_x = (gyro_x_raw - gyro_x_offset) / 131.0f;
+          float gyro_y = (gyro_y_raw - gyro_y_offset) / 131.0f;
+          float gyro_z = (gyro_z_raw - gyro_z_offset) / 131.0f;
 
-	      float dt = 0.01f;
+          uint32_t current_time = HAL_GetTick();
+          float dt = (current_time - previous_time) / 1000.0f;
+          previous_time = current_time;
 
-	      roll_gyro += gyro_x * dt;
-	      pitch_gyro += gyro_y * dt;
+          roll_gyro += gyro_x * dt;
+          pitch_gyro += gyro_y * dt;
 
-	      float roll =
-	          atan2f(accel_y, accel_z) * 180.0f / 3.14159265f;
+          float roll =
+              atan2f(accel_y, accel_z) * 180.0f / 3.14159265f;
 
-	      float pitch =
-	          atan2f(
-	              -accel_x,
-	              sqrtf(accel_y * accel_y + accel_z * accel_z)
-	          ) * 180.0f / 3.14159265f;
+          float pitch =
+              atan2f(
+                  -accel_x,
+                  sqrtf(accel_y * accel_y + accel_z * accel_z)
+              ) * 180.0f / 3.14159265f;
 
-	      char imu_buffer[160];
+          roll_filter =
+              0.90f * (roll_filter + gyro_x * dt)
+              + 0.10f * roll;
 
-	      int imu_length = snprintf(
-	          imu_buffer,
-	          sizeof(imu_buffer),
-	          "ACC Roll: %.2f | ACC Pitch: %.2f | GYRO Roll: %.2f | GYRO Pitch: %.2f\r\n",
-	          roll,
-	          pitch,
-	          roll_gyro,
-	          pitch_gyro
-	      );
+          pitch_filter =
+              0.90f * (pitch_filter + gyro_y * dt)
+              + 0.10f * pitch;
 
-	      HAL_UART_Transmit(
-	          &huart2,
-	          (uint8_t *)imu_buffer,
-	          imu_length,
-	          100
-	      );
-	  }
-	  else
-	  {
-	      const char error_message[] = "IMU read error\r\n";
+          float roll_error = roll_setpoint - roll_filter;
+          float pitch_error = pitch_setpoint - pitch_filter;
 
-	      HAL_UART_Transmit(
-	          &huart2,
-	          (uint8_t *)error_message,
-	          strlen(error_message),
-	          100
-	      );
-	  }
+          roll_pid_output = kp_roll * roll_error;
+          pitch_pid_output = kp_pitch * pitch_error;
 
-	  HAL_Delay(10);
+          char imu_buffer[200];
+
+          int imu_length = snprintf(
+              imu_buffer,
+              sizeof(imu_buffer),
+              "FILTER R: %.2f P: %.2f | ERROR R: %.2f P: %.2f | P-OUT R: %.2f P: %.2f\r\n",
+              roll_filter,
+              pitch_filter,
+              roll_error,
+              pitch_error,
+              roll_pid_output,
+              pitch_pid_output
+          );
+
+          HAL_UART_Transmit(
+              &huart2,
+              (uint8_t *)imu_buffer,
+              imu_length,
+              100
+          );
+      }
+      else
+      {
+          const char error_message[] = "IMU read error\r\n";
+
+          HAL_UART_Transmit(
+              &huart2,
+              (uint8_t *)error_message,
+              strlen(error_message),
+              100
+          );
+      }
+
+      HAL_Delay(10);
 
       /* USER CODE END WHILE */
 
