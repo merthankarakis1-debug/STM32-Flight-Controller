@@ -58,6 +58,9 @@ int32_t direction = 10;
 uint32_t adcValue = 0;
 char uartBuffer[64];
 float voltage = 0.0f;
+float gyro_x_offset = 0.0f;
+float gyro_y_offset = 0.0f;
+float gyro_z_offset = 0.0f;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -162,7 +165,74 @@ int main(void)
       HAL_MAX_DELAY
   );
 
+  const char calibration_message[] =
+      "Gyro calibration: keep sensor still...\r\n";
 
+  HAL_UART_Transmit(
+      &huart2,
+      (uint8_t *)calibration_message,
+      strlen(calibration_message),
+      100
+  );
+
+  int32_t gyro_x_sum = 0;
+  int32_t gyro_y_sum = 0;
+  int32_t gyro_z_sum = 0;
+
+  uint8_t gyro_data[6];
+
+  for (int i = 0; i < 1000; i++)
+  {
+      HAL_StatusTypeDef status = HAL_I2C_Mem_Read(
+          &hi2c1,
+          0x68 << 1,
+          0x43,
+          I2C_MEMADD_SIZE_8BIT,
+          gyro_data,
+          6,
+          100
+      );
+
+      if (status == HAL_OK)
+      {
+          int16_t gyro_x_raw =
+              (int16_t)((gyro_data[0] << 8) | gyro_data[1]);
+
+          int16_t gyro_y_raw =
+              (int16_t)((gyro_data[2] << 8) | gyro_data[3]);
+
+          int16_t gyro_z_raw =
+              (int16_t)((gyro_data[4] << 8) | gyro_data[5]);
+
+          gyro_x_sum += gyro_x_raw;
+          gyro_y_sum += gyro_y_raw;
+          gyro_z_sum += gyro_z_raw;
+      }
+
+      HAL_Delay(2);
+  }
+
+  gyro_x_offset = gyro_x_sum / 1000.0f;
+  gyro_y_offset = gyro_y_sum / 1000.0f;
+  gyro_z_offset = gyro_z_sum / 1000.0f;
+
+  char calibration_buffer[120];
+
+  int calibration_length = snprintf(
+      calibration_buffer,
+      sizeof(calibration_buffer),
+      "Calibration complete | Offsets: %.2f %.2f %.2f\r\n",
+      gyro_x_offset,
+      gyro_y_offset,
+      gyro_z_offset
+  );
+
+  HAL_UART_Transmit(
+      &huart2,
+      (uint8_t *)calibration_buffer,
+      calibration_length,
+      100
+  );
 
   // HIER EINFÜGEN
 
@@ -173,53 +243,80 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-      uint8_t accel_data[6];
+	  uint8_t imu_data[14];
 
-      HAL_StatusTypeDef status = HAL_I2C_Mem_Read(
-          &hi2c1,
-          0x68 << 1,
-          0x3B,
-          I2C_MEMADD_SIZE_8BIT,
-          accel_data,
-          6,
-          100
-      );
+	  HAL_StatusTypeDef status = HAL_I2C_Mem_Read(
+	      &hi2c1,
+	      0x68 << 1,
+	      0x3B,
+	      I2C_MEMADD_SIZE_8BIT,
+	      imu_data,
+	      14,
+	      100
+	  );
 
-      if (status == HAL_OK)
-      {
-          int16_t accel_x_raw =
-              (int16_t)((accel_data[0] << 8) | accel_data[1]);
+	  if (status == HAL_OK)
+	  {
+	      int16_t accel_x_raw =
+	          (int16_t)((imu_data[0] << 8) | imu_data[1]);
 
-          int16_t accel_y_raw =
-              (int16_t)((accel_data[2] << 8) | accel_data[3]);
+	      int16_t accel_y_raw =
+	          (int16_t)((imu_data[2] << 8) | imu_data[3]);
 
-          int16_t accel_z_raw =
-              (int16_t)((accel_data[4] << 8) | accel_data[5]);
+	      int16_t accel_z_raw =
+	          (int16_t)((imu_data[4] << 8) | imu_data[5]);
 
-          float accel_x = accel_x_raw / 16384.0f;
-          float accel_y = accel_y_raw / 16384.0f;
-          float accel_z = accel_z_raw / 16384.0f;
+	      int16_t gyro_x_raw =
+	          (int16_t)((imu_data[8] << 8) | imu_data[9]);
 
-          char accel_buffer[100];
+	      int16_t gyro_y_raw =
+	          (int16_t)((imu_data[10] << 8) | imu_data[11]);
 
-          int accel_length = snprintf(
-              accel_buffer,
-              sizeof(accel_buffer),
-              "AX: %.2f g | AY: %.2f g | AZ: %.2f g\r\n",
-              accel_x,
-              accel_y,
-              accel_z
-          );
+	      int16_t gyro_z_raw =
+	          (int16_t)((imu_data[12] << 8) | imu_data[13]);
 
-          HAL_UART_Transmit(
-              &huart2,
-              (uint8_t *)accel_buffer,
-              accel_length,
-              100
-          );
-      }
+	      float accel_x = accel_x_raw / 16384.0f;
+	      float accel_y = accel_y_raw / 16384.0f;
+	      float accel_z = accel_z_raw / 16384.0f;
 
-      HAL_Delay(200);
+	      float gyro_x = (gyro_x_raw - gyro_x_offset) / 131.0f;
+	      float gyro_y = (gyro_y_raw - gyro_y_offset) / 131.0f;
+	      float gyro_z = (gyro_z_raw - gyro_z_offset) / 131.0f;
+
+	      char imu_buffer[160];
+
+	      int imu_length = snprintf(
+	          imu_buffer,
+	          sizeof(imu_buffer),
+	          "A: %.2f %.2f %.2f g | G: %.2f %.2f %.2f deg/s\r\n",
+	          accel_x,
+	          accel_y,
+	          accel_z,
+	          gyro_x,
+	          gyro_y,
+	          gyro_z
+	      );
+
+	      HAL_UART_Transmit(
+	          &huart2,
+	          (uint8_t *)imu_buffer,
+	          imu_length,
+	          100
+	      );
+	  }
+	  else
+	  {
+	      const char error_message[] = "IMU read error\r\n";
+
+	      HAL_UART_Transmit(
+	          &huart2,
+	          (uint8_t *)error_message,
+	          strlen(error_message),
+	          100
+	      );
+	  }
+
+	  HAL_Delay(200);
 
       /* USER CODE END WHILE */
 
